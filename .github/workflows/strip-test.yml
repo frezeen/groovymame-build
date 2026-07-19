@@ -1,0 +1,128 @@
+name: Strip diagnostic (tiny)
+
+# TEST VELOCE (minuti, NON il full da 2h) per capire PERCHE' lo strip no-op'a
+# sul binario MAME del CI. Riproduce ESATTAMENTE i flag di produzione (build-mame.yml)
+# ma su SUBTARGET=tiny, poi ispeziona il binario con readelf/file e prova strip vs objcopy.
+#
+# Domande a cui risponde:
+#   - lo 'strip' del runner funziona su un binario MAME buildato coi nostri flag?
+#   - il binario ha sezioni debug (.debug_*) / symtab, oppure e' gia' "pulito"?
+#   - strip --strip-all e objcopy --strip-all si comportano diversamente?
+#   - quanti "section headers" ha il binario? (issue mamedev #6863: "too many sections")
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ strip-test ]
+
+permissions:
+  contents: read
+
+jobs:
+  strip-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (patch)
+        uses: actions/checkout@v4
+
+      - name: Install build deps + strumenti di diagnostica
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git build-essential ccache nasm python3 pkg-config binutils file \
+            libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libdrm-dev \
+            libasound2-dev libxinerama-dev libxrandr-dev libudev-dev \
+            liblua5.3-dev libzstd-dev libflac-dev libjpeg-dev libpng-dev \
+            libsqlite3-dev libexpat1-dev rapidjson-dev libglm-dev portaudio19-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: striptest-${{ github.sha }}
+          restore-keys: striptest-
+
+      - name: Checkout GroovyMAME gm0288sr222d
+        run: git clone --depth 1 --branch gm0288sr222d https://github.com/antonioginer/GroovyMAME.git gm
+
+      - name: Apply patches (identici alla produzione)
+        run: |
+          cd gm
+          shopt -s nullglob
+          FAIL=0
+          for p in ../patches/mame/*.patch; do
+            echo "== $(basename "$p") =="
+            if git apply --ignore-whitespace --check "$p" 2>/dev/null; then
+              git apply --ignore-whitespace "$p" && echo " ok (git apply)"
+            elif patch -p1 --fuzz=3 --forward -i "$p" 2>/dev/null; then
+              echo " ok (patch -p1, fuzz)"
+            else
+              echo "APPLY FALLITO: $p"; FAIL=1
+            fi
+          done
+          [ "$FAIL" = "1" ] && exit 1
+          true
+
+      - name: Build SUBTARGET=tiny (veloce) con i flag di produzione
+        env:
+          CCACHE_DIR: /home/runner/.ccache
+        run: |
+          set -euo pipefail
+          cd gm
+          ccache -M 10G
+          make -j"$(nproc)" \
+            TARGETOS=linux OSD=sdl \
+            TARGET=mame SUBTARGET=tiny \
+            PTR64=1 OPTIMIZE=3 \
+            REGENIE=1 PRECOMPILE=1 \
+            SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
+            NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
+            USE_SYSTEM_LIB_ZLIB=1 USE_SYSTEM_LIB_JPEG=1 \
+            USE_SYSTEM_LIB_SQLITE3=1 USE_SYSTEM_LIB_RAPIDJSON=1 \
+            USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
+            USE_SYSTEM_LIB_ZSTD=1 \
+            TOOLS=0 \
+            OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
+          echo "build tiny done"
+
+      - name: Diagnostica strip (readelf/file/strip/objcopy)
+        run: |
+          set -euo pipefail
+          cd gm
+          BIN=$(find . -maxdepth 1 -type f \( -name 'mametiny' -o -name 'mame' \) | head -1)
+          echo "BIN=$BIN  size=$(stat -c%s "$BIN") bytes"
+          echo
+          echo "=== file ==="
+          file "$BIN"
+          echo
+          echo "=== readelf -h (numero section headers) ==="
+          readelf -h "$BIN" | grep -iE "section|entry|machine"
+          echo
+          echo "=== sezioni debug/symtab presenti? ==="
+          readelf -S "$BIN" | grep -iE "debug|symtab|\.strtab" | head -40 || echo "NESSUNA sezione debug/symtab"
+          echo
+          echo "=== prova 'strip --strip-all' (su copia) ==="
+          cp "$BIN" /tmp/t_in; BEFORE=$(stat -c%s /tmp/t_in)
+          strip --strip-all /tmp/t_in -o /tmp/t_out 2>&1 | head
+          AFTER=$(stat -c%s /tmp/t_out)
+          echo "strip: $BEFORE -> $AFTER  (rimossi $((BEFORE-AFTER)) byte)"
+          echo
+          echo "=== prova 'objcopy --strip-all' (su copia) ==="
+          cp "$BIN" /tmp/o_in; OB=$(stat -c%s /tmp/o_in)
+          objcopy --strip-all /tmp/o_in /tmp/o_out 2>&1 | head
+          OAFTER=$(stat -c%s /tmp/o_out)
+          echo "objcopy: $OB -> $OAFTER (rimossi $((OB-OAFTER)) byte)"
+          echo
+          echo "=== dimensione binario prodotto da MAME (dopo STRIP_SYMBOLS=1 di genie) ==="
+          ls -la "$BIN"
+
+      - name: Upload binari di diagnostica
+        uses: actions/upload-artifact@v4
+        with:
+          name: strip-diag-tiny
+          path: |
+            gm/mametiny
+            /tmp/t_out
+            /tmp/o_out
+          if-no-files-found: warn
