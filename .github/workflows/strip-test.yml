@@ -84,7 +84,7 @@ jobs:
             USE_SYSTEM_LIB_ZSTD=1 \
             TOOLS=0 \
             OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
-          echo "build tiny done"
+          echo "build tiny done - strip test reale"
 
       - name: Diagnostica strip (readelf/file/strip/objcopy)
         run: |
