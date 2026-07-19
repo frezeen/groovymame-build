@@ -1,0 +1,165 @@
+name: Build GroovyMAME (Batocera drop-in)
+
+# Trigger:
+#  - manuale (workflow_dispatch): builda il tag indicato (input groovy_tag, default gm0288sr222d)
+#  - automatico (schedule): ogni giorno controlla se su antonioginer/GroovyMAME e' uscito
+#    un nuovo tag gm0*sr*; se si (e non e' gia' stato rilasciato), builda, applica i patch
+#    e pubblica il binario come GitHub Release.
+#
+# NOTA (onesta): il build e' automatico. I patch BATOCERA vengono applicati col metodo
+# di Buildroot (patch -p1, tollerante al fuzz) come fa Batocera stessa: i piccoli drift
+# di contesto (es. 005 su gm0289) si auto-risolvono. Se un patch e' REALMENTE rotto
+# (non solo drift), la run FALLISCE (allerta) e NON carica un binario rotto.
+
+on:
+  workflow_dispatch:
+    inputs:
+      groovy_tag:
+        description: 'GroovyMAME tag (gm0*sr*)'
+        default: 'gm0288sr222d'
+        required: true
+  schedule:
+    - cron: '17 3 * * *'     # controllo giornaliero (03:17 UTC)
+
+permissions:
+  contents: write            # per pubblicare la GitHub Release col binario
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determina l'ultimo tag GroovyMAME (gm0*sr*)
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Dispatch manuale: builda il tag scelto dall'utente (input groovy_tag)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.groovy_tag }}"
+            echo "dispatch -> build $TAG"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Schedule: trova l'ultimo tag gm0*sr* su GroovyMAME
+          LATEST=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/antonioginer/GroovyMAME/git/refs/tags" \
+            | grep -oE 'refs/tags/gm0[0-9]+sr[0-9]+[a-z]?' \
+            | sed 's#refs/tags/##' | sort -uV | tail -1)
+          echo "latest gm tag: $LATEST"
+          if [ -z "$LATEST" ]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Se esiste gia' una release per questo tag, e' gia' stato buildato -> skip
+          if gh release view "$LATEST" >/dev/null 2>&1; then
+            echo "release $LATEST gia' esistente -> skip"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release $LATEST assente -> build"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.check.outputs.build == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (patch)
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git build-essential ccache nasm python3 pkg-config \
+            libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libdrm-dev \
+            libasound2-dev libxinerama-dev libxrandr-dev libudev-dev \
+            liblua5.3-dev libzstd-dev libflac-dev libjpeg-dev libpng-dev \
+          libsqlite3-dev libexpat1-dev rapidjson-dev libglm-dev portaudio19-dev binutils
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: mame-${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            mame-${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }}-${{ runner.os }}-
+
+      - name: Checkout GroovyMAME
+        run: git clone --depth 1 --branch ${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }} https://github.com/antonioginer/GroovyMAME.git gm
+
+      - name: Apply patches (metodo Buildroot, fallback patch -p1 fuzz)
+        run: |
+          cd gm
+          shopt -s nullglob
+          FAIL=0
+          for p in ../patches/mame/*.patch; do
+            echo "== apply $(basename "$p") =="
+            if git apply --ignore-whitespace --check "$p" 2>/dev/null; then
+              git apply --ignore-whitespace "$p" && echo "  ok (git apply)"
+            elif patch -p1 --fuzz=3 --forward -i "$p" 2>/dev/null; then
+              echo "  ok (patch -p1, fuzz)"
+            else
+              echo "APPLY FALLITO: $p"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo "!!! Un patch e' realmente rotto per questo tag. Serve aggiornare patches/mame/. Build interrotto."
+            exit 1
+          fi
+
+      - name: Build (flag per RGS_CRT, -sound part = PortAudio/ALSA, no Qt/PulseAudio, 7 lib di sistema + FLAC bundled, strip verificato)
+        env:
+          CCACHE_DIR: /home/runner/.ccache
+        run: |
+          set -euo pipefail
+          cd gm
+          ccache -M 10G
+          make -j"$(nproc)" \
+            TARGETOS=linux OSD=sdl \
+            TARGET=mame SUBTARGET=mame \
+            PTR64=1 OPTIMIZE=3 \
+            REGENIE=1 PRECOMPILE=1 \
+            SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
+            NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
+            USE_SYSTEM_LIB_ZLIB=1 USE_SYSTEM_LIB_JPEG=1 \
+            USE_SYSTEM_LIB_SQLITE3=1 USE_SYSTEM_LIB_RAPIDJSON=1 \
+            USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
+            USE_SYSTEM_LIB_ZSTD=1 \
+            TOOLS=0 \
+            OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
+          echo "size before strip: $(stat -c%s mame) bytes"
+          strip -v mame
+          echo "size after strip:  $(stat -c%s mame) bytes"
+          if [ "$(stat -c%s mame)" -gt 250000000 ]; then
+            echo "ERRORE: strip non efficace, mame ancora >250MB"; exit 1
+          fi
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: groovymame-${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }}
+          path: gm/mame
+          if-no-files-found: error
+
+      - name: Pubblica GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.check.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" gm/mame --clobber
+          else
+            gh release create "$TAG" gm/mame \
+              --title "GroovyMAME $TAG" \
+              --notes "Drop-in per Batocera/RGS_CRT. Build automatico GitHub Actions (Ubuntu 24.04, glibc 2.39, ~100 MB strippato)."
+          fi
