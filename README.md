@@ -3,12 +3,14 @@
 Build automatico di **GroovyMAME** (drop-in per Batocera / RGS_CRT, x64) su GitHub Actions.
 
 ## Cosa fa
-- Compila il GroovyMAME **ufficiale** (`antonioginer/GroovyMAME`) ogni giorno: appena esce un
-  nuovo tag `gm0*sr*`, lo builda e pubblica il binario `mame` come GitHub Release.
+- Controlla ogni giorno il repo ufficiale GroovyMAME (`antonioginer/GroovyMAME`): quando esce un
+  nuovo tag `gm0*sr*`, lo builda e pubblica il binario `mame` come GitHub Release. Se quel tag è
+  già stato buildato (Release esistente), il build viene saltato.
 - Output: `mame` (~70-90 MB UPX, x64, dynamic), copiabile in `rgs15/binaries/mame` di RGS_CRT.
 
 ## Trigger
-- **Cron giornaliero** → build automatico della nuova versione di GroovyMAME.
+- **Cron giornaliero** → controllo automatico dei nuovi tag `gm0*sr*`: compila e pubblica la
+  Release solo al primo rilascio di un tag nuovo (se già buildato, salta).
 - **Manuale** (`workflow_dispatch`, input `groovy_tag`, default `gm0288sr222d`).
 
 ## Come lo buildiamo
