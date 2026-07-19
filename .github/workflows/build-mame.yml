@@ -156,6 +156,13 @@ jobs:
             echo "AVVISO: mame >300MB dopo gc-sections -> flag non efficaci"
           fi
 
+      - name: UPX compress (porta ~200-250MB -> ~70-90MB)
+        run: |
+          sudo apt-get install -y upx-ucl
+          cd gm
+          upx mame
+          echo "size after upx: $(stat -c%s mame) bytes"
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
@@ -173,5 +180,5 @@ jobs:
           else
             gh release create "$TAG" gm/mame \
               --title "GroovyMAME $TAG" \
-              --notes "Drop-in per Batocera/RGS_CRT. Build automatico GitHub Actions (Ubuntu 24.04, glibc 2.39, ~100 MB strippato)."
+              --notes "Drop-in per Batocera/RGS_CRT. Build automatico GitHub Actions (Ubuntu 24.04, glibc 2.39, LTO + gc-sections + UPX, ~70-90 MB)."
           fi
