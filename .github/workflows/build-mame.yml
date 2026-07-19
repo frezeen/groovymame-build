@@ -127,7 +127,7 @@ jobs:
           make -j"$(nproc)" \
             TARGETOS=linux OSD=sdl \
             TARGET=mame SUBTARGET=mame \
-            PTR64=1 OPTIMIZE=3 \
+            PTR64=1 OPTIMIZE=2 \
             REGENIE=1 PRECOMPILE=1 \
             SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
             NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
