@@ -124,6 +124,13 @@ jobs:
           set -euo pipefail
           cd gm
           ccache -M 10G
+          printf '#!/bin/bash
+exec ccache gcc "$@"
+' | sudo tee /usr/local/bin/ccache-gcc >/dev/null
+          printf '#!/bin/bash
+exec ccache g++ "$@"
+' | sudo tee /usr/local/bin/ccache-g++ >/dev/null
+          sudo chmod +x /usr/local/bin/ccache-gcc /usr/local/bin/ccache-g++
           make -j"$(nproc)" \
             TARGETOS=linux OSD=sdl \
             TARGET=mame SUBTARGET=mame \
@@ -137,8 +144,8 @@ jobs:
             USE_SYSTEM_LIB_ZSTD=1 \
             TOOLS=0 \
             CXXFLAGS="-flto -ffunction-sections -fdata-sections" \
-            LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
-            OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
+            LDOPTS="-flto -Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
+            OVERRIDE_CC=ccache-gcc OVERRIDE_CXX=ccache-g++
           echo "size before strip: $(stat -c%s mame) bytes"
           strip -v mame
           echo "size after strip:  $(stat -c%s mame) bytes"
