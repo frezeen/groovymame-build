@@ -136,15 +136,24 @@ jobs:
             USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
             USE_SYSTEM_LIB_ZSTD=1 \
             TOOLS=0 \
+            CXXFLAGS="-ffunction-sections -fdata-sections" \
+            LDOPTS="-Wl,--gc-sections -Wl,--pack-dyn-relocs=relr" \
             OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
           echo "size before strip: $(stat -c%s mame) bytes"
           strip -v mame
           echo "size after strip:  $(stat -c%s mame) bytes"
-          # Nota: un MAME full (42k+ driver) strippato e' ~430MB. Un build
-          # NON strippato supererebbe i ~550MB: in quel caso avvisa (ma non
-          # fallire il job, altrimenti lo step Post-Cache non salva e si perde la cache).
-          if [ "$(stat -c%s mame)" -gt 550000000 ]; then
-            echo "AVVISO: mame >550MB dopo strip -> probabilmente NON strippato"
+          # Guardia: gc-sections NON deve rimuovere i driver MAME.
+          # Se li rimuove, -listfull torna pochi driver -> build rotta.
+          DRIVERS=$(./mame -listfull 2>/dev/null | wc -l)
+          echo "driver count: $DRIVERS"
+          if [ "$DRIVERS" -lt 40000 ]; then
+            echo "ERRORE: gc-sections ha rimosso i driver MAME ($DRIVERS < 40000)"
+            exit 1
+          fi
+          # Un MAME full (42k+ driver) ottimizzato e' ~100-150MB.
+          # Se >300MB, i flag gc-sections/relr non hanno funzionato.
+          if [ "$(stat -c%s mame)" -gt 300000000 ]; then
+            echo "AVVISO: mame >300MB dopo gc-sections -> flag non efficaci"
           fi
 
       - name: Upload binary
