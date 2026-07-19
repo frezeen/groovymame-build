@@ -128,7 +128,7 @@ jobs:
             TARGETOS=linux OSD=sdl \
             TARGET=mame SUBTARGET=mame \
             PTR64=1 OPTIMIZE=2 \
-            REGENIE=1 PRECOMPILE=1 \
+            REGENIE=1 PRECOMPILE=0 \
             SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
             NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
             USE_SYSTEM_LIB_ZLIB=1 USE_SYSTEM_LIB_JPEG=1 \
@@ -136,8 +136,8 @@ jobs:
             USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
             USE_SYSTEM_LIB_ZSTD=1 \
             TOOLS=0 \
-            CXXFLAGS="-ffunction-sections -fdata-sections" \
-            LDOPTS="-Wl,--gc-sections -Wl,--pack-dyn-relocs=relr" \
+            CXXFLAGS="-flto -ffunction-sections -fdata-sections" \
+            LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
             OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++'
           echo "size before strip: $(stat -c%s mame) bytes"
           strip -v mame
