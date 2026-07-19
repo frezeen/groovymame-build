@@ -124,12 +124,8 @@ jobs:
           set -euo pipefail
           cd gm
           ccache -M 10G
-          printf '#!/bin/bash
-exec ccache gcc "$@"
-' | sudo tee /usr/local/bin/ccache-gcc >/dev/null
-          printf '#!/bin/bash
-exec ccache g++ "$@"
-' | sudo tee /usr/local/bin/ccache-g++ >/dev/null
+          printf '#!/bin/bash\nexec ccache gcc "$@"\n' | sudo tee /usr/local/bin/ccache-gcc >/dev/null
+          printf '#!/bin/bash\nexec ccache g++ "$@"\n' | sudo tee /usr/local/bin/ccache-g++ >/dev/null
           sudo chmod +x /usr/local/bin/ccache-gcc /usr/local/bin/ccache-g++
           make -j"$(nproc)" \
             TARGETOS=linux OSD=sdl \
