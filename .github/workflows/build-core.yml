@@ -97,7 +97,7 @@ jobs:
           JOBS=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 / 2 + 1 ))
           [ "$JOBS" -gt "$(nproc)" ] && JOBS=$(nproc)
           make -j"$JOBS" -C ./ \
-            linux_x64 OPENMP=1 REGENIE=1 NOWERROR=1 \
+            linux_x64 OPENMP=1 REGENIE=1 NOWERROR=1 PRECOMPILE=1 \
             PYTHON_EXECUTABLE=python3 CONFIG=libretro LIBRETRO_OS="unix" \
             ARCH="" PROJECT="" ARCHOPTS="" OPTIMIZE=2 \
             CXXFLAGS="-ffunction-sections -fdata-sections" \
