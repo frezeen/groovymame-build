@@ -131,7 +131,7 @@ jobs:
             TARGETOS=linux OSD=sdl \
             TARGET=mame SUBTARGET=mame \
             PTR64=1 OPTIMIZE=2 \
-            REGENIE=1 PRECOMPILE=0 \
+            REGENIE=1 PRECOMPILE=1 \
             SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
             NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
             USE_SYSTEM_LIB_ZLIB=1 USE_SYSTEM_LIB_JPEG=1 \
@@ -139,7 +139,7 @@ jobs:
             USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
             USE_SYSTEM_LIB_ZSTD=1 \
             TOOLS=0 \
-            CXXFLAGS="-flto -ffunction-sections -fdata-sections" \
+            CXXFLAGS="-ffunction-sections -fdata-sections" \
             LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
             OVERRIDE_CC=ccache-gcc OVERRIDE_CXX=ccache-g++
           echo "size before strip: $(stat -c%s mame) bytes"
@@ -159,7 +159,7 @@ jobs:
             echo "AVVISO: mame >300MB dopo gc-sections -> flag non efficaci"
           fi
 
-      - name: UPX compress (porta ~200-250MB -> ~70-90MB)
+      - name: UPX compress
         run: |
           sudo apt-get install -y upx-ucl
           cd gm
@@ -183,5 +183,5 @@ jobs:
           else
             gh release create "$TAG" gm/mame \
               --title "GroovyMAME $TAG" \
-              --notes "Drop-in per Batocera/RGS_CRT. Build automatico GitHub Actions (Ubuntu 24.04, glibc 2.39, LTO + gc-sections + UPX, ~70-90 MB)."
+              --notes "Drop-in per Batocera/RGS_CRT. Build automatico GitHub Actions (Ubuntu 24.04, glibc 2.39, gc-sections + UPX, ~91 MB)."
           fi
