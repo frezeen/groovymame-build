@@ -1,0 +1,124 @@
+name: Build GroovyMAME (GOLD linker test)
+
+# Test: LTO via GOLD linker invece di BFD.
+# GOLD carica i .o uno alla volta → meno RAM necessaria per il link.
+# Se funziona su GitHub (7GB runner), sara' il nuovo metodo standard.
+
+on:
+  workflow_dispatch:
+    inputs:
+      groovy_tag:
+        description: 'GroovyMAME tag (gm0*sr*)'
+        default: 'gm0288sr222d'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (patch)
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git build-essential ccache nasm python3 pkg-config \
+            libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libdrm-dev \
+            libasound2-dev libxinerama-dev libxrandr-dev libudev-dev \
+            liblua5.3-dev libzstd-dev libflac-dev libjpeg-dev libpng-dev \
+            libsqlite3-dev libexpat1-dev rapidjson-dev libglm-dev portaudio19-dev binutils
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: goldtest-${{ github.event.inputs.groovy_tag }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            goldtest-${{ github.event.inputs.groovy_tag }}-${{ runner.os }}-
+
+      - name: Verifica GOLD linker
+        run: |
+          echo "=== gold ==="
+          which gold && gold --version | head -1
+          echo "=== plugin LTO ==="
+          gold --help 2>&1 | grep -q plugin && echo "plugin OK" || echo "NO plugin!"
+          echo "=== default ld ==="
+          ld --version | head -1
+
+      - name: Checkout GroovyMAME
+        run: git clone --depth 1 --branch ${{ github.event.inputs.groovy_tag }} https://github.com/antonioginer/GroovyMAME.git gm
+
+      - name: Apply patches (metodo Buildroot, fallback patch -p1 fuzz)
+        run: |
+          cd gm
+          shopt -s nullglob
+          FAIL=0
+          for p in ../patches/mame/*.patch; do
+            echo "== apply $(basename "$p") =="
+            if git apply --ignore-whitespace --check "$p" 2>/dev/null; then
+              git apply --ignore-whitespace "$p" && echo "  ok (git apply)"
+            elif patch -p1 --fuzz=3 --forward -i "$p" 2>/dev/null; then
+              echo "  ok (patch -p1, fuzz)"
+            else
+              echo "APPLY FALLITO: $p"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo "!!! Un patch e' realmente rotto per questo tag. Serve aggiornare patches/mame/. Build interrotto."
+            exit 1
+          fi
+
+      - name: Build (LTO via GOLD)
+        env:
+          CCACHE_DIR: /home/runner/.ccache
+        run: |
+          set -euo pipefail
+          cd gm
+          ccache -M 10G
+          printf '#!/bin/bash\nexec ccache gcc "$@"\n' | sudo tee /usr/local/bin/ccache-gcc >/dev/null
+          printf '#!/bin/bash\nexec ccache g++ "$@"\n' | sudo tee /usr/local/bin/ccache-g++ >/dev/null
+          sudo chmod +x /usr/local/bin/ccache-gcc /usr/local/bin/ccache-g++
+          make -j"$(nproc)" \
+            TARGETOS=linux OSD=sdl \
+            TARGET=mame SUBTARGET=mame \
+            PTR64=1 OPTIMIZE=2 \
+            REGENIE=1 PRECOMPILE=0 \
+            SYMBOLS=0 STRIP_SYMBOLS=1 STRIP=strip \
+            NO_USE_PULSEAUDIO=1 USE_QTDEBUG=0 \
+            USE_SYSTEM_LIB_ZLIB=1 USE_SYSTEM_LIB_JPEG=1 \
+            USE_SYSTEM_LIB_SQLITE3=1 USE_SYSTEM_LIB_RAPIDJSON=1 \
+            USE_SYSTEM_LIB_EXPAT=1 USE_SYSTEM_LIB_GLM=1 \
+            USE_SYSTEM_LIB_ZSTD=1 \
+            TOOLS=0 \
+            CXXFLAGS="-flto -ffunction-sections -fdata-sections" \
+            LDOPTS="-fuse-ld=gold -flto -Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
+            OVERRIDE_CC=ccache-gcc OVERRIDE_CXX=ccache-g++
+          echo "size before strip: $(stat -c%s mame) bytes"
+          strip -v mame
+          echo "size after strip:  $(stat -c%s mame) bytes"
+          # Guardia: gc-sections NON deve rimuovere i driver MAME.
+          DRIVERS=$(./mame -listfull 2>/dev/null | wc -l)
+          echo "driver count: $DRIVERS"
+          if [ "$DRIVERS" -lt 40000 ]; then
+            echo "ERRORE: pochi driver ($DRIVERS < 40000) -> gc-sections ha rimosso driver"
+            exit 1
+          fi
+
+      - name: UPX compress
+        run: |
+          sudo apt-get install -y upx-ucl
+          cd gm
+          upx mame
+          echo "size after upx: $(stat -c%s mame) bytes"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: groovymame-${{ github.event.inputs.groovy_tag }}-gold-test
+          path: gm/mame
+          if-no-files-found: error
