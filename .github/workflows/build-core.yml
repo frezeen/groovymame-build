@@ -73,7 +73,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git build-essential ccache nasm python3 pkg-config binutils \
+            git build-essential ccache nasm python3 pkg-config binutils upx \
             libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libasound2-dev \
             libxinerama-dev libxrandr-dev libudev-dev libzstd-dev \
             libjpeg-dev libpng-dev libsqlite3-dev libexpat1-dev rapidjson-dev libglm-dev
@@ -99,13 +99,16 @@ jobs:
           make -j"$JOBS" -C ./ \
             linux_x64 OPENMP=1 REGENIE=1 NOWERROR=1 \
             PYTHON_EXECUTABLE=python3 CONFIG=libretro LIBRETRO_OS="unix" \
-            ARCH="" PROJECT="" ARCHOPTS="" \
+            ARCH="" PROJECT="" ARCHOPTS="" OPTIMIZE=2 \
+            CXXFLAGS="-ffunction-sections -fdata-sections" \
+            LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
             OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++' OVERRIDE_LD='ccache g++' \
             RANLIB='ranlib' AR='ar' \
             PTR64=1 LIBRETRO_CPU=x86_64 PLATFORM=x86 \
             CROSS_BUILD=1 TARGET="mame" SUBTARGET="mame" RETRO=1 OSD="retro" DEBUG=0
           ls -la mame_libretro.so
           strip -v mame_libretro.so || true
+          upx --best mame_libretro.so || true
       - name: Pubblica GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
