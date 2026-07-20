@@ -1,19 +1,33 @@
 # groovymame-build
 
-Build automatico di **GroovyMAME** (drop-in per Batocera / RGS_CRT, x64) su GitHub Actions.
+Build automatici di **GroovyMAME** (drop-in per Batocera / RGS_CRT, x64) e **libretro-mame**
+(core RetroArch per arcade su Batocera) su GitHub Actions.
 
 ## Cosa fa
-- Controlla ogni giorno il repo ufficiale GroovyMAME (`antonioginer/GroovyMAME`): quando esce un
-  nuovo tag `gm0*sr*`, lo builda e pubblica il binario `mame` come GitHub Release. Se quel tag è
-  già stato buildato (Release esistente), il build viene saltato.
+Due workflow indipendenti, ciascuno col suo cron e la sua Release:
+
+### GroovyMAME — `build-mame.yml`
+- Controlla ogni giorno il repo ufficiale (`antonioginer/GroovyMAME`): quando esce un
+  nuovo tag `gm0*sr*`, lo builda e pubblica il binario `mame` come GitHub Release. Se quel
+  tag è già stato buildato (Release esistente), il build viene saltato.
 - Output: `mame` (~91 MB UPX, x64, dynamic), copiabile in `rgs15/binaries/mame` di RGS_CRT.
 
-## Trigger
-- **Cron giornaliero** → controllo automatico dei nuovi tag `gm0*sr*`: compila e pubblica la
-  Release solo al primo rilascio di un tag nuovo (se già buildato, salta).
-- **Manuale** (`workflow_dispatch`, input `groovy_tag`, default `gm0288sr222d`).
+### libretro-mame — `build-core.yml`
+- Controlla ogni giorno il repo ufficiale (`libretro/mame`): quando esce un nuovo tag
+  `lrmame0*`, lo builda e pubblica il core `mame_libretro.so` come GitHub Release. Se quel
+  tag è già stato buildato, il build viene saltato.
+- Output: `mame_libretro.so` (~120 MB UPX, x64), copiabile in `rgs15/binaries/` di RGS_CRT.
 
-## Come lo buildiamo
+## Trigger
+- **Cron giornaliero** → controllo automatico dei nuovi tag: compila e pubblica la Release
+  solo al primo rilascio di un tag nuovo (se già buildato, salta).
+- **Manuale** (`workflow_dispatch`, input `groovy_tag` per GroovyMAME, `libretro_tag` per
+  libretro-mame).
+
+---
+
+## GroovyMAME
+
 Build su Ubuntu 24.04, GroovyMAME `gm0288sr222d` (MAME 0.288 + SwitchRes 2.22d).
 
 | Opzione | Valore |
@@ -37,7 +51,7 @@ Build su Ubuntu 24.04, GroovyMAME `gm0288sr222d` (MAME 0.288 + SwitchRes 2.22d).
 Il binario è **dynamic** (linka le lib di sistema: libGL, SDL2, X11… presenti su Batocera).
 Le patch vengono applicate prima del build (`git apply` → fallback `patch -p1 --fuzz=3`).
 
-## Patch
+### Patch
 9 patch ufficiali Batocera (set completo **meno `001`/`004`/`007`**):
 
 | Patch | Scopo |
@@ -52,13 +66,45 @@ Le patch vengono applicate prima del build (`git apply` → fallback `patch -p1 
 | `012` | fix-largefile64 |
 | `013` | fix-qt-buildoptions |
 
+---
+
+## libretro-mame
+
+Build su Ubuntu 24.04, libretro/mame tag `lrmame0288` (MAME 0.288).
+
+| Opzione | Valore |
+|---|---|
+| Target | `mame` (subtarget `mame`, core libretro, x64) |
+| Arch | `PTR64=1 LIBRETRO_CPU=x86_64 PLATFORM=x86` |
+| Config | `CONFIG=libretro LIBRETRO_OS=unix RETRO=1 OSD=retro` |
+| Ottimizzazione | `OPTIMIZE=2` |
+| Precompilati (PCH) | `PRECOMPILE=1` |
+| `REGENIE=1` | forza rigenerazione genie (applica CXXFLAGS/LDOPTS) |
+| Strip | `strip mame_libretro.so` |
+| DCE (gc-sections) | `CXXFLAGS="-ffunction-sections -fdata-sections"` |
+| Link | `LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs"` |
+| Compressione | `upx mame_libretro.so` (~300-400 MB → ~120 MB) |
+| Lib di sistema | zlib, jpeg, sqlite3, expat, zstd |
+| ccache | `OVERRIDE_CC/CXX='ccache gcc/g++'`, cache persistita tra run |
+
+Il core è **dynamic** (linka le lib di sistema: libGL, SDL2, X11… presenti su Batocera).
+Nessuna patch applicata — il tag `lrmame0*` di libretro/mame è già pronto per libretro.
+
+---
+
 ## Download
-- **Release** (stabile): https://github.com/frezeen/groovymame-build/releases → `mame`.
-  Repo **public**: chiunque può scaricare.
+- **Release** (stabile): https://github.com/frezeen/groovymame-build/releases → `mame`
+  (GroovyMAME) e `mame_libretro.so` (libretro-mame). Repo **public**: chiunque può scaricare.
 - **Artefatto per-run** (debug): Actions → run → sezione *Artifacts*.
 
 ## Deploy su RGS_CRT
+### GroovyMAME
 1. Scarica `mame` dalla Release.
 2. Copia in `rgs15/binaries/mame` (mai scrivere su `/usr/bin/mame/mame`).
 3. `./crt-install.sh`.
 4. Test: `./mame -showconfig`; poi un rom reale → `display.log` deve segnare il modo video nativo.
+
+### libretro-mame
+1. Scarica `mame_libretro.so` dalla Release.
+2. Sostituisci in `/usr/lib/libretro/mame_libretro.so` (attenzione: overlay Batocera).
+3. Test: `retroarch --libretro /usr/lib/libretro/mame_libretro.so /path/rom.zip`.
