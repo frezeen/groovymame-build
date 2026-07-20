@@ -6,7 +6,7 @@ Build automatico di **GroovyMAME** (drop-in per Batocera / RGS_CRT, x64) su GitH
 - Controlla ogni giorno il repo ufficiale GroovyMAME (`antonioginer/GroovyMAME`): quando esce un
   nuovo tag `gm0*sr*`, lo builda e pubblica il binario `mame` come GitHub Release. Se quel tag è
   già stato buildato (Release esistente), il build viene saltato.
-- Output: `mame` (~70-90 MB UPX, x64, dynamic), copiabile in `rgs15/binaries/mame` di RGS_CRT.
+- Output: `mame` (~91 MB UPX, x64, dynamic), copiabile in `rgs15/binaries/mame` di RGS_CRT.
 
 ## Trigger
 - **Cron giornaliero** → controllo automatico dei nuovi tag `gm0*sr*`: compila e pubblica la
@@ -21,12 +21,12 @@ Build su Ubuntu 24.04, GroovyMAME `gm0288sr222d` (MAME 0.288 + SwitchRes 2.22d).
 | Target | `mame` (subtarget `mame`, full) |
 | Arch | `PTR64=1` (x64) |
 | Ottimizzazione | `OPTIMIZE=2` |
-| Precompilati (PCH) | `PRECOMPILE=0` (necessario per LTO) |
+| Precompilati (PCH) | `PRECOMPILE=1` |
 | `REGENIE=1` | forza rigenerazione genie (applica CXXFLAGS/LDOPTS) |
 | Strip | `SYMBOLS=0 STRIP_SYMBOLS=1` + `strip mame` |
-| LTO + DCE | `CXXFLAGS="-flto -ffunction-sections -fdata-sections"` |
+| DCE (gc-sections) | `CXXFLAGS="-ffunction-sections -fdata-sections"` |
 | Link | `LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs"` |
-| Compressione | `upx mame` (~200-250 MB → ~70-90 MB) |
+| Compressione | `upx mame` (~200-250 MB → ~91 MB) |
 | Audio | `NO_USE_PULSEAUDIO=1`, PortAudio attivo (`-sound part`) |
 | SDL | `USE_SDL=1` |
 | Lib di sistema | zlib, jpeg, sqlite3, rapidjson, expat, glm, zstd |
