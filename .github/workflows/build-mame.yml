@@ -1,7 +1,7 @@
 name: Build GroovyMAME (Batocera drop-in)
 
 # Trigger:
-#  - manuale (workflow_dispatch): builda il tag indicato (input groovy_tag, default gm0288sr222d)
+#  - manuale (workflow_dispatch): builda il tag indicato (input groovy_tag, vuoto = ultimo)
 #  - automatico (schedule): ogni giorno controlla se su antonioginer/GroovyMAME e' uscito
 #    un nuovo tag gm0*sr*; se si (e non e' gia' stato rilasciato), builda, applica i patch
 #    e pubblica il binario come GitHub Release.
@@ -15,9 +15,13 @@ on:
   workflow_dispatch:
     inputs:
       groovy_tag:
-        description: 'GroovyMAME tag (gm0*sr*)'
-        default: 'gm0288sr222d'
-        required: true
+        description: 'GroovyMAME tag (gm0*sr*). Vuoto = ultimo tag trovato.'
+        default: ''
+        required: false
+      force:
+        description: 'Rebuild forzato anche se la release esiste già'
+        type: boolean
+        default: false
   schedule:
     - cron: '17 3 * * *'     # controllo giornaliero (03:17 UTC)
 
@@ -32,44 +36,42 @@ jobs:
       build: ${{ steps.decide.outputs.build }}
     steps:
       - uses: actions/checkout@v4
-      - name: Determina l'ultimo tag GroovyMAME (gm0*sr*)
+      - name: Determina il tag da buildare (gm0*sr*, dinamico)
         id: decide
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Dispatch manuale: builda il tag scelto dall'utente (input groovy_tag)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.groovy_tag }}"
-            echo "dispatch -> build $TAG"
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          # Tag: input manuale se fornito, altrimenti ultimo gm0*sr* (dinamico)
+          TAG="${{ github.event.inputs.groovy_tag || '' }}"
+          FORCE="${{ github.event.inputs.force || 'false' }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/repos/antonioginer/GroovyMAME/git/refs/tags" \
+              | grep -oE 'refs/tags/gm0[0-9]+sr[0-9]+[a-z]*' \
+              | sed 's#refs/tags/##' | sort -uV | tail -1)
+            echo "auto-detect -> $TAG"
+          else
+            echo "dispatch manuale -> $TAG"
           fi
-          # Schedule: trova l'ultimo tag gm0*sr* su GroovyMAME
-          LATEST=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/antonioginer/GroovyMAME/git/refs/tags" \
-            | grep -oE 'refs/tags/gm0[0-9]+sr[0-9]+[a-z]?' \
-            | sed 's#refs/tags/##' | sort -uV | tail -1)
-          echo "latest gm tag: $LATEST"
-          if [ -z "$LATEST" ]; then
+          if [ -z "$TAG" ]; then
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Se esiste gia' una release per questo tag, e' gia' stato buildato -> skip
-          if gh release view "$LATEST" >/dev/null 2>&1; then
-            echo "release $LATEST gia' esistente -> skip"
-            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          # Release gia' esistente e non forzata -> skip
+          if [ "$FORCE" != "true" ] && gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG gia' esistente -> skip"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "release $LATEST assente -> build"
-            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "release $TAG assente o forzata -> build"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
   build:
     needs: check
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.check.outputs.build == 'true' }}
+    if: ${{ needs.check.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout (patch)

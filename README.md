@@ -19,10 +19,10 @@ Due workflow indipendenti, ciascuno col suo cron e la sua Release:
 - Output: `mame_libretro.so` (~120 MB UPX, x64), copiabile in `rgs15/binaries/` di RGS_CRT.
 
 ## Trigger
-- **Cron giornaliero** → controllo automatico dei nuovi tag: compila e pubblica la Release
-  solo al primo rilascio di un tag nuovo (se già buildato, salta).
-- **Manuale** (`workflow_dispatch`, input `groovy_tag` per GroovyMAME, `libretro_tag` per
-  libretro-mame).
+- **Cron giornaliero** → auto-detect dell'ultimo tag disponibile (gm0*sr* / lrmame0*):
+  builda e pubblica la Release solo se non esiste già una release per quel tag.
+- **Manuale** (`workflow_dispatch`): input `groovy_tag` / `libretro_tag` (vuoto = ultimo
+  tag trovato) + input `force` (rebuild anche se la release esiste già).
 
 ---
 
