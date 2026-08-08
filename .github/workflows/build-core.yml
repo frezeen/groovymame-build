@@ -1,0 +1,124 @@
+name: Build libretro-MAME
+
+# Build del core libretro-mame (mame_libretro.so, x64) su GitHub Actions.
+# Workflow COMPLETAMENTE SEPARATO da build-mame.yml (GroovyMAME): suo cron, suo processo,
+# suo artifact/release. Non condivide nulla con il build di GroovyMAME.
+#  - manuale (workflow_dispatch): input libretro_tag, default lrmame0288
+#  - automatico (schedule): ogni giorno controlla se su libretro/mame e' uscito un nuovo
+#    tag lrmame0*; se si (e non e' gia' stato rilasciato), builda e pubblica il core come Release.
+#
+# NOTA: il comando di build e' allineato a quello di Batocera
+# (package/batocera/emulators/retroarch/libretro/libretro-mame/libretro-mame.mk) per x86_64.
+
+on:
+  workflow_dispatch:
+    inputs:
+      libretro_tag:
+        description: 'libretro-mame tag (lrmame0*)'
+        required: false
+        default: 'lrmame0288'
+  schedule:
+    - cron: '47 4 * * *'     # cron separato da build-mame (03:17)
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide versione libretro-mame
+        id: decide
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.libretro_tag }}"
+            echo "dispatch -> build $TAG"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LATEST=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/libretro/mame/git/refs/tags" \
+            | grep -oE 'refs/tags/lrmame0[0-9]+' \
+            | sed 's#refs/tags/##' | sort -uV | tail -1)
+          echo "latest lrmame tag: $LATEST"
+          if [ -z "$LATEST" ]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh release view "$LATEST" >/dev/null 2>&1; then
+            echo "release $LATEST gia' esistente -> skip"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release $LATEST assente -> build"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.check.outputs.build == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git build-essential ccache nasm python3 pkg-config binutils upx \
+            libsdl2-dev libsdl2-ttf-dev libfontconfig-dev libasound2-dev \
+            libxinerama-dev libxrandr-dev libudev-dev libzstd-dev \
+            libjpeg-dev libpng-dev libsqlite3-dev libexpat1-dev rapidjson-dev libglm-dev
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: lrmame-${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            lrmame-${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }}-${{ runner.os }}-
+      - name: Checkout libretro/mame
+        run: git clone --depth 1 --branch ${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }} https://github.com/libretro/mame.git lm
+      - name: Build core (allineato a Batocera libretro-mame.mk, x86_64)
+        env:
+          CCACHE_DIR: /home/runner/.ccache
+        run: |
+          set -euo pipefail
+          cd lm
+          ccache -M 10G
+          # job limit basato sulla RAM (Batocera fa cosi': evita OOM sul runner)
+          JOBS=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 / 2 + 1 ))
+          [ "$JOBS" -gt "$(nproc)" ] && JOBS=$(nproc)
+          make -j"$JOBS" -C ./ \
+            linux_x64 OPENMP=1 REGENIE=1 NOWERROR=1 PRECOMPILE=1 \
+            PYTHON_EXECUTABLE=python3 CONFIG=libretro LIBRETRO_OS="unix" \
+            ARCH="" PROJECT="" ARCHOPTS="" OPTIMIZE=2 \
+            CXXFLAGS="-ffunction-sections -fdata-sections" \
+            LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
+            OVERRIDE_CC='ccache gcc' OVERRIDE_CXX='ccache g++' OVERRIDE_LD='ccache g++' \
+            RANLIB='ranlib' AR='ar' \
+            PTR64=1 LIBRETRO_CPU=x86_64 PLATFORM=x86 \
+            CROSS_BUILD=1 TARGET="mame" SUBTARGET="mame" RETRO=1 OSD="retro" DEBUG=0
+          ls -la mame_libretro.so
+          strip -v mame_libretro.so || true
+          upx --best mame_libretro.so || true
+      - name: Pubblica GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.check.outputs.tag }}"
+          ASSET=lm/mame_libretro.so
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "libretro-mame $TAG" \
+              --notes "Core libretro MAME (x64) build automatico GitHub Actions (allineato a Batocera)."
+          fi
