@@ -86,9 +86,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: lrmame-${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }}-${{ runner.os }}-${{ github.sha }}
+          key: lrmame-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            lrmame-${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }}-${{ runner.os }}-
+            lrmame-${{ runner.os }}-
       - name: Checkout libretro/mame
         run: git clone --depth 1 --branch ${{ github.event.inputs.libretro_tag || needs.check.outputs.tag }} https://github.com/libretro/mame.git lm
       - name: Build core (allineato a Batocera libretro-mame.mk, x86_64)

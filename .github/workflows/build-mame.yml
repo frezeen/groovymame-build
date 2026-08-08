@@ -91,9 +91,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: mame-${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }}-${{ runner.os }}-${{ github.sha }}
+          key: mame-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            mame-${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }}-${{ runner.os }}-
+            mame-${{ runner.os }}-
 
       - name: Checkout GroovyMAME
         run: git clone --depth 1 --branch ${{ github.event.inputs.groovy_tag || needs.check.outputs.tag }} https://github.com/antonioginer/GroovyMAME.git gm
