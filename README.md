@@ -28,7 +28,9 @@ Due workflow indipendenti, ciascuno col suo cron e la sua Release:
 
 ## GroovyMAME
 
-Build su Ubuntu 24.04, GroovyMAME `gm0288sr222d` (MAME 0.288 + SwitchRes 2.22d).
+Build su Ubuntu 24.04. Tag deciso dinamicamente (ultimo `gm0*sr*` disponibile,
+oppure input manuale). Ultimo buildato con successo: `gm0288sr222d`
+(MAME 0.288 + SwitchRes 2.22d); per 0.289+ serve la fix delle patch (vedi sotto).
 
 | Opzione | Valore |
 |---|---|
@@ -52,7 +54,7 @@ Il binario è **dynamic** (linka le lib di sistema: libGL, SDL2, X11… presenti
 Le patch vengono applicate prima del build (`git apply` → fallback `patch -p1 --fuzz=3`).
 
 ### Patch
-9 patch ufficiali Batocera (set completo **meno `001`/`004`/`007`**):
+8 patch ufficiali Batocera obbligatorie (set completo **meno `001`/`004`/`007`**):
 
 | Patch | Scopo |
 |---|---|
@@ -64,13 +66,17 @@ Le patch vengono applicate prima del build (`git apply` → fallback `patch -p1 
 | `010` | fix-gun-aiming (jpark / opwolf3) |
 | `011` | fix-compilation (obbligatoria per 0.288) |
 | `012` | fix-largefile64 |
-| `013` | fix-qt-buildoptions |
+
+In più **`013` (fix-qt-buildoptions)**, in `patches/mame-obsolete/`: applicata in
+best effort, se non attacca viene saltata. Non attacca più da **0.289** perché
+upstream ha spostato il blocco Qt in `scripts/src/osd/modules.lua` racchiuso in
+`if _OPTIONS["USE_QTDEBUG"]=="1"` — bug già fixato a monte.
 
 ---
 
 ## libretro-mame
 
-Build su Ubuntu 24.04, libretro/mame tag `lrmame0288` (MAME 0.288).
+Build su Ubuntu 24.04, libretro/mame tag `lrmame0289` (MAME 0.289).
 
 | Opzione | Valore |
 |---|---|

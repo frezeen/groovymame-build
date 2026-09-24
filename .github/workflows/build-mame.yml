@@ -119,6 +119,24 @@ jobs:
             exit 1
           fi
 
+          # Patch OBSOLETE (patches/mame-obsolete/): best effort, se non attaccano
+          # vengono SALTATE con warn invece di fermare il build.
+          # Serve per quando upstream fixa da solo il bug che la patch curava:
+          # 013-fix-qt-buildoptions non attacca piu' da 0.289 (il blocco Qt vive
+          # ora in scripts/src/osd/modules.lua, gia' dentro if USE_QTDEBUG=="1").
+          # Da 0.289 in poi questa cartella evita il fallimento quotidiano di
+          # "Apply patches" che bloccava la release del nuovo tag.
+          for p in ../patches/mame-obsolete/*.patch; do
+            echo "== obsolete: $(basename "$p") =="
+            if git apply --ignore-whitespace --check "$p" 2>/dev/null; then
+              git apply --ignore-whitespace "$p" && echo "  ok (git apply)"
+            elif patch -p1 --fuzz=3 --forward -i "$p" >/dev/null 2>&1; then
+              echo "  ok (patch -p1, fuzz)"
+            else
+              echo "  SKIP: non piu' applicabile a questo tag (gia' fixata upstream)"
+            fi
+          done
+
       - name: Build (flag per RGS_CRT, -sound part = PortAudio/ALSA, no Qt/PulseAudio, 7 lib di sistema + FLAC bundled, strip verificato)
         env:
           CCACHE_DIR: /home/runner/.ccache
