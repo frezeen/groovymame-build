@@ -122,6 +122,13 @@ jobs:
           # job limit basato sulla RAM (Batocera fa cosi': evita OOM sul runner)
           JOBS=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 / 2 + 1 ))
           [ "$JOBS" -gt "$(nproc)" ] && JOBS=$(nproc)
+          # diagnostica: la run del 08/08/2026 ha compilato 9558 file in 3h15
+          # (4,9s/file) contro 2,4s/file della build GroovyMAME: stessa soglia,
+          # stesso PCH, nessuno stall -> si vuole sapere con chehwgardware.
+          echo "=== CPU: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs) ==="
+          echo "=== nproc=$(nproc)  MemTotal=$(grep MemTotal /proc/meminfo)  JOBS=$JOBS ==="
+          echo "=== compiler: $(g++ --version | head -1) ==="
+          SECONDS=0
           make -j"$JOBS" -C ./ \
             linux_x64 OPENMP=1 REGENIE=1 NOWERROR=1 PRECOMPILE=1 \
             PYTHON_EXECUTABLE=python3 CONFIG=libretro LIBRETRO_OS="unix" \
@@ -133,6 +140,7 @@ jobs:
             PTR64=1 LIBRETRO_CPU=x86_64 PLATFORM=x86 \
             CROSS_BUILD=1 TARGET="mame" SUBTARGET="mame" RETRO=1 OSD="retro" DEBUG=0
           wait || true
+          echo "=== compile+link durata: $((SECONDS/60))m$((SECONDS%60))s  con JOBS=$JOBS ==="
           ccache -s
           ls -la mame_libretro.so
           strip -v mame_libretro.so || true
