@@ -94,10 +94,31 @@ jobs:
       - name: Build core (allineato a Batocera libretro-mame.mk, x86_64)
         env:
           CCACHE_DIR: /home/runner/.ccache
+          # ccache col PCH: senza sloppiness+pch_extsum l'84% delle compilazioni
+          # resta uncacheable (could_not_use_precompiled_header) e la cache da
+          # 10G non serve a nulla. Stesse impostazioni del workflow GroovyMAME.
+          CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_ctime,include_file_mtime
+          CCACHE_PCH_EXTSUM: "1"
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESSLEVEL: "1"
         run: |
           set -euo pipefail
           cd lm
           ccache -M 10G
+          # Il PCH (emu.h.gch, 255MB) viene hashed come .sum: 69 byte invece di 255MB
+          GCH=build/linux_gcc/obj/x64/Release/emu.h.gch
+          [ -f "$GCH" ] || GCH=build/projects/retro/mame/gmake-linux/../../../linux_gcc/obj/x64/Release/emu.h.gch
+          ( for _ in $(seq 1 3600); do
+              G=$(find build -name emu.h.gch -type f 2>/dev/null | head -1)
+              if [ -n "$G" ]; then
+                s1=$(stat -c %s "$G"); sleep 4; s2=$(stat -c %s "$G")
+                if [ "$s1" = "$s2" ] && [ "$s1" -gt 100000000 ]; then
+                  sha256sum "$G" > "$G.sum" && echo "PCH.sum creato ($(basename "$G"))"
+                  break
+                fi
+              fi
+              sleep 3
+            done ) &
           # job limit basato sulla RAM (Batocera fa cosi': evita OOM sul runner)
           JOBS=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 / 2 + 1 ))
           [ "$JOBS" -gt "$(nproc)" ] && JOBS=$(nproc)
@@ -111,9 +132,13 @@ jobs:
             RANLIB='ranlib' AR='ar' \
             PTR64=1 LIBRETRO_CPU=x86_64 PLATFORM=x86 \
             CROSS_BUILD=1 TARGET="mame" SUBTARGET="mame" RETRO=1 OSD="retro" DEBUG=0
+          wait || true
+          ccache -s
           ls -la mame_libretro.so
           strip -v mame_libretro.so || true
-          upx --best mame_libretro.so || true
+          # upx DEFAULT, non --best: sulla .so da 316MB --best ci mette 29 minuti
+          # per ~1-2MB in piu' (misurato run #31241725451: 29m04s).
+          time upx mame_libretro.so || true
       - name: Pubblica GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
