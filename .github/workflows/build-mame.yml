@@ -140,6 +140,16 @@ jobs:
       - name: Build (flag per RGS_CRT, -sound part = PortAudio/ALSA, no Qt/PulseAudio, 7 lib di sistema + FLAC bundled, strip verificato)
         env:
           CCACHE_DIR: /home/runner/.ccache
+          # --- ccache che funziona col PCH di MAME -------------------------
+          # Senza sloppiness+pch_extsum l'84% delle compilazioni finisce in
+          # "could_not_use_precompiled_header" = uncacheable: la cache da 10G
+          # resta quasi vuota e ogni run ricompila tutto (misurato su 0.289).
+          # MAME usa gia' -include (FORCE_INCLUDE nei .make generati), cioe'
+          # la forma che il manuale ccache richiede per GCC.
+          CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_ctime,include_file_mtime
+          CCACHE_PCH_EXTSUM: "1"
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESSLEVEL: "1"
         run: |
           set -euo pipefail
           cd gm
@@ -147,6 +157,24 @@ jobs:
           printf '#!/bin/bash\nexec ccache gcc "$@"\n' | sudo tee /usr/local/bin/ccache-gcc >/dev/null
           printf '#!/bin/bash\nexec ccache g++ "$@"\n' | sudo tee /usr/local/bin/ccache-g++ >/dev/null
           sudo chmod +x /usr/local/bin/ccache-gcc /usr/local/bin/ccache-g++
+
+          # Il PCH (emu.h.gch) pesa 255MB: senza il file .sum ccache lo hasha
+          # a ogni singola compilazione. Lo generiamo appena make lo produce.
+          GCH=build/linux_gcc/obj/x64/Release/emu.h.gch
+          (
+            for _ in $(seq 1 1800); do
+              if [ -f "$GCH" ]; then
+                s1=$(stat -c %s "$GCH"); sleep 4; s2=$(stat -c %s "$GCH")
+                if [ "$s1" = "$s2" ] && [ "$s1" -gt 100000000 ]; then
+                  sha256sum "$GCH" > "$GCH.sum"
+                  echo "PCH.sum creato: ccache hashera 69 byte invece di 255MB"
+                  break
+                fi
+              fi
+              sleep 2
+            done
+          ) &
+
           make -j"$(nproc)" \
             TARGETOS=linux OSD=sdl \
             TARGET=mame SUBTARGET=mame \
@@ -162,6 +190,9 @@ jobs:
             CXXFLAGS="-ffunction-sections -fdata-sections" \
             LDOPTS="-Wl,--gc-sections -Wl,-z,pack-relative-relocs" \
             OVERRIDE_CC=ccache-gcc OVERRIDE_CXX=ccache-g++
+          wait || true
+          echo "=== ccache (quota della cache salvata per le prossime run) ==="
+          ccache -s
           echo "size before strip: $(stat -c%s mame) bytes"
           strip -v mame
           echo "size after strip:  $(stat -c%s mame) bytes"
